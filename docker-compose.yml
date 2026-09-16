@@ -1,0 +1,34 @@
+services:
+  loxberry:
+    build: .
+    image: loxberry-experimental:4.0
+    container_name: loxberry
+    privileged: true          # required because systemd runs as PID 1
+    cgroup: host
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - loxberry-data:/opt/loxberry
+    ports:
+      # "<host port>:<container port>" - only the left-hand number needs to
+      # change if it clashes with something else you already run. Defaults
+      # and full explanation of every port are in .env.example / README.md.
+      - "${LOXBERRY_HTTP_PORT:-8880}:80"
+      - "${LOXBERRY_HTTPS_PORT:-8843}:443"
+      - "${LOXBERRY_SSH_PORT:-2222}:22"
+      - "${LOXBERRY_FTP_PORT:-2121}:21"
+      - "${LOXBERRY_MQTT_PORT:-18830}:1883"
+      # Samba (NetBIOS + SMB) is off by default: it needs several ports and
+      # is rarely reachable meaningfully through remapped host ports anyway.
+      # Uncomment if you actually want file sharing from outside the host:
+      # - "${LOXBERRY_SAMBA_UDP_137:-1137}:137/udp"
+      # - "${LOXBERRY_SAMBA_UDP_138:-1138}:138/udp"
+      # - "${LOXBERRY_SAMBA_TCP_139:-1139}:139"
+      # - "${LOXBERRY_SAMBA_TCP_445:-1445}:445"
+    restart: unless-stopped
+
+volumes:
+  loxberry-data:

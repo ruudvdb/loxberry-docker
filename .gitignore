@@ -1,0 +1,6 @@
+# Local port configuration - copy .env.example to .env and keep it out of git
+.env
+
+# Docker / OS noise
+*.log
+.DS_Store
