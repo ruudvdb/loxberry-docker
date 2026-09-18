@@ -68,6 +68,12 @@ interface is reachable again. Watch it happen with:
 docker logs -f loxberry
 ```
 
+(Under the hood, systemd forwards journald's output to `/dev/console`,
+which Docker's log driver picks up - without that, `docker logs` would
+only ever show the first couple of boot lines, and you'd need
+`docker exec -it loxberry journalctl -u loxberry-autoinstall.service -f`
+instead to see live progress.)
+
 If you want a redeploy to be instant instead, the real fix is baking
 the system packages into the image itself at build time rather than
 relying on `install_trixie_v4.sh` to apt-install them at runtime -

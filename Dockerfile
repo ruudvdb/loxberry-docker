@@ -48,6 +48,18 @@ RUN printf '#!/bin/sh\nexit 0\n' > /usr/sbin/policy-rc.d \
 RUN mkdir -p /etc/systemd/system \
     && ln -sf /dev/null /etc/systemd/system/watchdog.service
 
+# By default, once systemd (PID 1) finishes early boot, it routes all
+# unit output to journald only - `docker logs` won't show anything past
+# the first couple of boot lines, only `journalctl -u ...` will. Forward
+# journald's output to /dev/console too, which Docker's log driver does
+# pick up, so `docker logs -f loxberry` shows live install progress.
+RUN mkdir -p /etc/systemd/journald.conf.d \
+    && cat <<'EOF' > /etc/systemd/journald.conf.d/docker-console.conf
+[Journal]
+ForwardToConsole=yes
+TTYPath=/dev/console
+EOF
+
 # --- Fake just enough DietPi for the installer's checks to pass -------------
 RUN mkdir -p /boot/dietpi/func
 
