@@ -12,7 +12,7 @@ services:
       - /run/lock
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - loxberry-data:/opt/loxberry
+      - /home/docker/loxberry-data:/opt/loxberry
     ports:
       # "<host port>:<container port>" - only the left-hand number needs to
       # change if it clashes with something else you already run. Defaults
@@ -30,6 +30,3 @@ services:
       # - "${LOXBERRY_SAMBA_TCP_139:-1139}:139"
       # - "${LOXBERRY_SAMBA_TCP_445:-1445}:445"
     restart: unless-stopped
-
-volumes:
-  loxberry-data:
