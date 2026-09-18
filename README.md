@@ -124,19 +124,24 @@ docker exec -it loxberry /root/install_trixie_v4.sh
 
 ## LoxBerry healthcheck.pl patch (Docker false positives)
 
-Fixes two false positives in `/opt/loxberry/sbin/healthcheck.pl`:
+Fixes three false positives in `/opt/loxberry/sbin/healthcheck.pl`:
 
 1. **RootFS ReadWrite check** only recognized `ext4` as a valid
    read-write filesystem. Docker's root is OverlayFS, so it always
    reported "not mounted ReadWrite" even when the filesystem is
    genuinely writable. Now matches any filesystem type.
-2. **RootFS free space check** only looked at the free-space
-   *percentage*. On a large disk, 5-10% free can still be tens of GB —
-   plenty. Now it only warns when the percentage **and** the absolute
-   free space (default floor: 5GB) are both low.
-
-Verified with `perl -c` against the exact code you pasted from your
-container — syntax is valid, brace-balanced.
+2. **RootFS free space check** (`check_rootfssize`) only looked at the
+   free-space *percentage*. On a large disk, 5-10% free can still be
+   tens of GB — plenty. Now it only warns when the percentage **and**
+   the absolute free space (default floor: 5GB) are both low.
+3. **RAMDiscs free space check** (`check_tmpfssize`) checks
+   `$lbhomedir/log/plugins` and `$lbhomedir/log/system_tmpfs`. On a
+   real Raspberry Pi these live on an actual tmpfs (RAM), but in this
+   Docker setup they're just regular folders on the bind-mounted disk
+   — so this check ends up reporting the same "/opt/loxberry is below
+   limit of 5%" warning a second time, under a different name. Same
+   fix: only warn when percentage **and** absolute free space are both
+   low.
 
 ### Apply it
 

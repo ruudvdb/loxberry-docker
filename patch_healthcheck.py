@@ -49,7 +49,11 @@ def patch_rootfssize(text: str) -> str:
     if marker not in text:
         print("[warn] check_rootfssize: sub not found, skipping")
         return text
-    if "absolute_min_kb" in text:
+    # Scope the "already patched" check to this sub's own body, not the
+    # whole file - otherwise a match from check_tmpfssize's identical
+    # "absolute_min_kb" text causes this function to be skipped wrongly.
+    sub_body = text.split(marker, 1)[1]
+    if "absolute_min_kb" in sub_body:
         print("[skip] check_rootfssize already patched")
         return text
 
@@ -104,6 +108,65 @@ def patch_rootfssize(text: str) -> str:
     return new_text
 
 
+def patch_tmpfssize(text: str) -> str:
+    marker = "sub check_tmpfssize"
+    if marker not in text:
+        print("[warn] check_tmpfssize: sub not found, skipping")
+        return text
+    if "absolute_min_kb" in text.split(marker, 1)[1].split("sub check_rootfssize")[0]:
+        print("[skip] check_tmpfssize already patched")
+        return text
+
+    pattern = re.compile(
+        r"foreach my \$disk \(\@pathtc\) \{\n"
+        r"\s*my %folderinfo = LoxBerry::System::diskspaceinfo\(\$disk\);\n"
+        r"\s*next if\( \$folderinfo\{size\} eq \"0\" or "
+        r"\(\$folderinfo\{available\}/\$folderinfo\{size\}\*100\) > 25 \);\n"
+        r"\s*if \( \$folderinfo\{available\}/\$folderinfo\{size\}\*100 > 5 \) \{\n"
+        r"\s*\$result\{result\} = \"\$folderinfo\{mountpoint\} is below limit of 25% discspace.*?\n"
+        r"\s*\$result\{status\} = '4';\n"
+        r"\s*\} else \{\n"
+        r"\s*\$result\{result\} = \"\$folderinfo\{mountpoint\} is below limit of 5% discspace.*?\n"
+        r"\s*\$result\{status\} = '3';\n"
+        r"\s*\}\n"
+        r"\s*\}",
+        re.DOTALL,
+    )
+
+    replacement = (
+        "foreach my $disk (@pathtc) {\n"
+        "\t\t\tmy %folderinfo = LoxBerry::System::diskspaceinfo($disk);\n"
+        "\t\t\tmy $absolute_min_kb = " + str(ABSOLUTE_MIN_KB) + "; "
+        "# 5 GB - same floor as check_rootfssize\n"
+        "\t\t\tnext if( $folderinfo{size} eq \"0\" "
+        "or ($folderinfo{available}/$folderinfo{size}*100) > 25 "
+        "or $folderinfo{available} > $absolute_min_kb );\n"
+        "\t\t\tif ( $folderinfo{available}/$folderinfo{size}*100 > 5 ) {\n"
+        "\t\t\t\t$result{result} = \"$folderinfo{mountpoint} is below limit of 25% discspace "
+        "AND below 5GB absolute free space (AVAL \""
+        ".LoxBerry::System::bytes_humanreadable($folderinfo{available}, \"K\")"
+        ".\"/SIZE \".LoxBerry::System::bytes_humanreadable($folderinfo{size}, \"K\")"
+        ".\"). Please reboot your LoxBerry.\";\n"
+        "\t\t\t\t$result{status} = '4';\n"
+        "\t\t\t} else {\n"
+        "\t\t\t\t$result{result} = \"$folderinfo{mountpoint} is below limit of 5% discspace "
+        "AND below 5GB absolute free space (AVAL \""
+        ".LoxBerry::System::bytes_humanreadable($folderinfo{available}, \"K\")"
+        ".\"/SIZE \".LoxBerry::System::bytes_humanreadable($folderinfo{size}, \"K\")"
+        ".\"). Please reboot your LoxBerry.\";\n"
+        "\t\t\t\t$result{status} = '3';\n"
+        "\t\t\t}\n"
+        "\t\t}"
+    )
+
+    new_text, count = pattern.subn(replacement, text)
+    if count == 0:
+        print("[warn] check_tmpfssize: expected foreach block not found, skipping")
+        return text
+    print(f"[ok]   check_tmpfssize: absolute free-space floor added ({count} block replaced)")
+    return new_text
+
+
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} /path/to/healthcheck.pl")
@@ -123,6 +186,7 @@ def main():
 
     text = target.read_text()
     text = patch_readonlyrootfs(text)
+    text = patch_tmpfssize(text)
     text = patch_rootfssize(text)
     target.write_text(text)
     print(f"[done] {target} patched")
