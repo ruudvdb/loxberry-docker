@@ -122,6 +122,59 @@ docker compose up -d
 docker exec -it loxberry /root/install_trixie_v4.sh
 ```
 
+# LoxBerry healthcheck.pl patch (Docker false positives)
+
+Fixes two false positives in `/opt/loxberry/sbin/healthcheck.pl`:
+
+1. **RootFS ReadWrite check** only recognized `ext4` as a valid
+   read-write filesystem. Docker's root is OverlayFS, so it always
+   reported "not mounted ReadWrite" even when the filesystem is
+   genuinely writable. Now matches any filesystem type.
+2. **RootFS free space check** only looked at the free-space
+   *percentage*. On a large disk, 5-10% free can still be tens of GB —
+   plenty. Now it only warns when the percentage **and** the absolute
+   free space (default floor: 5GB) are both low.
+
+Verified with `perl -c` against the exact code you pasted from your
+container — syntax is valid, brace-balanced.
+
+## Apply it
+
+```bash
+# Copy the file out of the running container
+docker cp loxberry:/opt/loxberry/sbin/healthcheck.pl ./healthcheck.pl
+
+# Run the patch (writes healthcheck.pl.bak automatically)
+python3 patch_healthcheck.py ./healthcheck.pl
+
+# Copy the patched file back in
+docker cp ./healthcheck.pl loxberry:/opt/loxberry/sbin/healthcheck.pl
+
+# Re-run the healthcheck to confirm
+docker exec -it loxberry /opt/loxberry/sbin/healthcheck.pl
+```
+
+No service restart needed — `healthcheck.pl` is invoked fresh each
+time (by cron / the web UI), it isn't a long-running daemon.
+
+## Adjusting the 5GB floor
+
+Open `patch_healthcheck.py` and change `ABSOLUTE_MIN_KB` at the top
+before running it, e.g. for a 2GB floor:
+
+```python
+ABSOLUTE_MIN_KB = 2 * 1024 * 1024  # 2 GB
+```
+
+## Note
+
+This patches a **core** LoxBerry file, not a plugin. The next time
+you run LoxBerry's own update through the web UI, `healthcheck.pl`
+will be overwritten and this patch will need to be re-applied. The
+script is idempotent (safe to re-run) and keeps a `.bak` of whatever
+it last patched, so re-applying after an update is just a matter of
+running the same three commands again.
+
 ## Recommendation
 
 For actual production use, a Raspberry Pi, another officially supported
