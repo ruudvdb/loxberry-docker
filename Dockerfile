@@ -95,6 +95,20 @@ RUN curl -fsSL -o /root/install_trixie_v4.sh \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Auto-reinstall on boot: /opt/loxberry's DATA survives a container
+# recreate (it's bind-mounted from the host), but the apt-installed
+# system packages (apache2, samba, mosquitto, vsftpd, ...) live in the
+# container's own writable layer and do NOT. This unit detects that
+# mismatch at every boot and re-runs the installer automatically -
+# important for GitOps-style deploys (e.g. Portainer "pull and
+# redeploy") where the container gets recreated from the image.
+COPY loxberry-autoinstall.sh /usr/local/bin/loxberry-autoinstall.sh
+RUN chmod +x /usr/local/bin/loxberry-autoinstall.sh
+COPY loxberry-autoinstall.service /etc/systemd/system/loxberry-autoinstall.service
+RUN mkdir -p /etc/systemd/system/multi-user.target.wants \
+    && ln -s /etc/systemd/system/loxberry-autoinstall.service \
+        /etc/systemd/system/multi-user.target.wants/loxberry-autoinstall.service
+
 # Ports LoxBerry normally uses (web, ssh, ftp, samba, mqtt). These are the
 # CONTAINER-internal ports; how they're published to the host is entirely
 # controlled in docker-compose.yml / .env — see README.md.

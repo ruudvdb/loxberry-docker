@@ -1,17 +1,13 @@
 #!/bin/bash
-# Boots systemd as PID 1. The actual LoxBerry installation is NOT run
-# automatically here (systemctl calls need real systemd already running),
-# so it must be triggered manually after the container is up. See README.md.
+# Boots systemd as PID 1. The loxberry-autoinstall.service unit (baked
+# into the image, enabled by default) takes care of running or
+# re-running the LoxBerry installer automatically once systemd is up -
+# see loxberry-autoinstall.sh for details.
 set -e
 
-MARKER="/opt/loxberry/config/system/do_lbupdate"
-
-if [ ! -e "$MARKER" ]; then
-    echo ">>> First start: LoxBerry does not appear to be installed yet."
-    echo ">>> systemd is starting now. Once the container is up, install with:"
-    echo ">>>   docker exec -it loxberry /root/install_trixie_v4.sh"
-else
-    echo ">>> LoxBerry appears to be installed already, starting systemd."
-fi
+echo ">>> Starting systemd. LoxBerry installer will run automatically"
+echo ">>> if system packages are missing (first boot, or after a redeploy)."
+echo ">>> Follow progress with: docker logs -f loxberry"
 
 exec "$@"
+

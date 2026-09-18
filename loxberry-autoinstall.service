@@ -1,0 +1,15 @@
+[Unit]
+Description=Re-run the LoxBerry installer if system packages are missing (e.g. after a redeploy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/loxberry-autoinstall.sh
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

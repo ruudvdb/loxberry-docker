@@ -34,6 +34,44 @@ controller.
   start` instead.
 - Plugins that try to run Docker themselves (Docker-in-Docker) or
   reconfigure host network interfaces.
+  
+## Surviving redeploys (Portainer, GitOps, etc.)
+
+If this stack is deployed via Portainer (or any other setup that
+recreates the container from the image, e.g. after a git push), be
+aware of what does and doesn't survive:
+
+- **Survives**: everything under `/opt/loxberry` (config, plugins,
+  logs) - it's bind-mounted from `LOXBERRY_DATA_DIR` on the host.
+- **Does NOT survive**: the apt-installed system packages (`apache2`,
+  `samba`, `mosquitto`, `vsftpd`, ...). Those live in the container's
+  own writable layer, which is discarded whenever the container is
+  recreated.
+
+To bridge that gap, this image bakes in `loxberry-autoinstall.service`
+— a systemd unit, enabled by default, that runs on every boot and:
+
+1. Checks whether the system packages are actually present.
+2. If not (fresh container, or a redeploy that recreated it), removes
+   the stale install marker in `/opt/loxberry` (which would otherwise
+   make the installer refuse to run) and re-runs
+   `install_trixie_v4.sh` automatically.
+3. If the packages are already there, does nothing and boots normally.
+
+In practice this means: a "pull and redeploy" in Portainer is safe and
+won't lose your LoxBerry configuration, but it does trigger another
+10-15 minute reinstall of the system packages before the web
+interface is reachable again. Watch it happen with:
+
+```bash
+docker logs -f loxberry
+```
+
+If you want a redeploy to be instant instead, the real fix is baking
+the system packages into the image itself at build time rather than
+relying on `install_trixie_v4.sh` to apt-install them at runtime -
+that's a heavier change (effectively vendoring the installer's package
+list into the Dockerfile) and isn't done here yet.
 
 ## Requirements
 
