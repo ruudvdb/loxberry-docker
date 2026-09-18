@@ -197,6 +197,30 @@ older and rejects the `pull_policy` key entirely (an error like
 line instead - Compose then falls back to auto-naming the built image
 and skips pulling it by design.
 
+## Known gotcha: install hangs forever on "watchdog.service"
+
+There's no real `/dev/watchdog` hardware timer inside a container.
+Starting `watchdog.service` doesn't fail fast in that situation - it
+hangs indefinitely, which in turn blocks `dpkg --configure --pending`
+and stalls the entire installer partway through (Apache, Samba, etc.
+never get configured, so the web UI never comes up).
+
+The Dockerfile masks `watchdog.service` from the start (before the
+`watchdog` package is even installed), so a clean build shouldn't hit
+this. If you're stuck on an older image or already mid-install when
+this happens, unstick it with:
+
+```bash
+docker exec -it loxberry systemctl mask watchdog.service
+docker exec -it loxberry ps aux | grep -E "watchdog|ask-password"
+# if it's still stuck after ~a minute, kill the PIDs the above shows:
+docker exec -it loxberry kill -9 <pid> <pid>
+```
+
+Then follow progress again with `docker logs -f loxberry` /
+`docker exec -it loxberry journalctl -u loxberry-autoinstall.service -f`
+- the installer should now run to completion.
+
 ## Known gotcha: services stuck "enabled" but "inactive (dead)"
 
 Debian's base images ship a `policy-rc.d` that blocks service starts
@@ -228,7 +252,12 @@ docker exec -it loxberry /root/install_trixie_v4.sh
 
 ## LoxBerry healthcheck.pl patch (Docker false positives)
 
-Fixes three false positives in `/opt/loxberry/sbin/healthcheck.pl`:
+Fixes three false positives in `/opt/loxberry/sbin/healthcheck.pl`.
+**This is applied automatically** by `loxberry-autoinstall.sh` — every
+time the installer runs, and again on every boot in case a LoxBerry
+core update (from the web UI) overwrote `healthcheck.pl` with the
+original, unpatched version. No manual step needed; the rest of this
+section is only for understanding what it does or running it by hand.
 
 1. **RootFS ReadWrite check** only recognized `ext4` as a valid
    read-write filesystem. Docker's root is OverlayFS, so it always
@@ -247,20 +276,14 @@ Fixes three false positives in `/opt/loxberry/sbin/healthcheck.pl`:
    fix: only warn when percentage **and** absolute free space are both
    low.
 
-### Apply it
+### Running it manually
+
+Only needed for a one-off, e.g. while debugging - normally this
+already happened automatically:
 
 ```bash
-## Copy the file out of the running container
-docker cp loxberry:/opt/loxberry/sbin/healthcheck.pl ./healthcheck.pl
-
-## Run the patch (writes healthcheck.pl.bak automatically)
-python3 patch_healthcheck.py ./healthcheck.pl
-
-## Copy the patched file back in
-docker cp ./healthcheck.pl loxberry:/opt/loxberry/sbin/healthcheck.pl
-
-## Re-run the healthcheck to confirm
-docker exec -it loxberry /opt/loxberry/sbin/healthcheck.pl
+docker exec -it loxberry python3 /usr/local/bin/patch_healthcheck.py /opt/loxberry/sbin/healthcheck.pl
+docker exec -it loxberry bash -lc "/opt/loxberry/sbin/healthcheck.pl"
 ```
 
 No service restart needed — `healthcheck.pl` is invoked fresh each
@@ -268,12 +291,15 @@ time (by cron / the web UI), it isn't a long-running daemon.
 
 ### Adjusting the 5GB floor
 
-Open `patch_healthcheck.py` and change `ABSOLUTE_MIN_KB` at the top
-before running it, e.g. for a 2GB floor:
+Edit `ABSOLUTE_MIN_KB` near the top of `patch_healthcheck.py` in this
+repo, e.g. for a 2GB floor:
 
 ```python
 ABSOLUTE_MIN_KB = 2 * 1024 * 1024  # 2 GB
 ```
+
+Then rebuild the image (`docker compose build`) so the updated script
+gets baked in and used on the next install/boot.
 
 ## Note
 

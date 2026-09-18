@@ -37,6 +37,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN printf '#!/bin/sh\nexit 0\n' > /usr/sbin/policy-rc.d \
     && chmod +x /usr/sbin/policy-rc.d
 
+# Mask watchdog.service BEFORE the "watchdog" package is ever installed.
+# There's no real /dev/watchdog hardware timer inside a container, and
+# starting this unit hangs indefinitely (systemd waits on ExecStart to
+# return) instead of failing fast - which in turn blocks
+# `dpkg --configure --pending` and stalls the entire installer. Masking
+# pre-empts this: even once the package later drops its own unit file,
+# systemd's config lookup finds this symlink first and deb-systemd-invoke
+# skips calling "start" on it entirely.
+RUN mkdir -p /etc/systemd/system \
+    && ln -sf /dev/null /etc/systemd/system/watchdog.service
+
 # --- Fake just enough DietPi for the installer's checks to pass -------------
 RUN mkdir -p /boot/dietpi/func
 
@@ -92,9 +103,6 @@ RUN curl -fsSL -o /root/install_trixie_v4.sh \
     https://raw.githubusercontent.com/mschlenstedt/Loxberry_Installer/main/install_trixie_v4.sh \
     && chmod +x /root/install_trixie_v4.sh
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
 # Auto-reinstall on boot: /opt/loxberry's DATA survives a container
 # recreate (it's bind-mounted from the host), but the apt-installed
 # system packages (apache2, samba, mosquitto, vsftpd, ...) live in the
@@ -104,6 +112,13 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # redeploy") where the container gets recreated from the image.
 COPY loxberry-autoinstall.sh /usr/local/bin/loxberry-autoinstall.sh
 RUN chmod +x /usr/local/bin/loxberry-autoinstall.sh
+
+# Applied automatically by loxberry-autoinstall.sh after every install/
+# reinstall, and again on every boot in case a LoxBerry core update
+# overwrote healthcheck.pl with the original, unpatched version.
+COPY patch_healthcheck.py /usr/local/bin/patch_healthcheck.py
+RUN chmod +x /usr/local/bin/patch_healthcheck.py
+
 COPY loxberry-autoinstall.service /etc/systemd/system/loxberry-autoinstall.service
 RUN mkdir -p /etc/systemd/system/multi-user.target.wants \
     && ln -s /etc/systemd/system/loxberry-autoinstall.service \
@@ -118,5 +133,4 @@ STOPSIGNAL SIGRTMIN+3
 
 # systemd must be PID 1, so the container MUST run with --privileged (or
 # equivalent capabilities) and the cgroup mount from docker-compose.yml.
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/lib/systemd/systemd"]
