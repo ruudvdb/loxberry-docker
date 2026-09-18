@@ -10,6 +10,8 @@ services:
     container_name: loxberry
     hostname: loxberry
     privileged: true          # required because systemd runs as PID 1
+    tty: true                 # required for ForwardToConsole (journald ->
+                               # /dev/console) to actually reach `docker logs`
     cgroup: host
     tmpfs:
       - /tmp
