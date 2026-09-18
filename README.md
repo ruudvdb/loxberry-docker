@@ -34,7 +34,7 @@ controller.
   start` instead.
 - Plugins that try to run Docker themselves (Docker-in-Docker) or
   reconfigure host network interfaces.
-  
+
 ## Surviving redeploys (Portainer, GitOps, etc.)
 
 If this stack is deployed via Portainer (or any other setup that
@@ -42,7 +42,8 @@ recreates the container from the image, e.g. after a git push), be
 aware of what does and doesn't survive:
 
 - **Survives**: everything under `/opt/loxberry` (config, plugins,
-  logs) - it's bind-mounted from `LOXBERRY_DATA_DIR` on the host.
+  logs) - it's bind-mounted from a fixed host path (see "Where your
+  data lives" below).
 - **Does NOT survive**: the apt-installed system packages (`apache2`,
   `samba`, `mosquitto`, `vsftpd`, ...). Those live in the container's
   own writable layer, which is discarded whenever the container is
@@ -72,6 +73,35 @@ the system packages into the image itself at build time rather than
 relying on `install_trixie_v4.sh` to apt-install them at runtime -
 that's a heavier change (effectively vendoring the installer's package
 list into the Dockerfile) and isn't done here yet.
+
+## Where your data lives
+
+`/opt/loxberry` (LoxBerry's config, plugins, logs, everything the
+installer sets up) is bind-mounted directly from a fixed path on the
+host, set in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - /home/docker/loxberry-data:/opt/loxberry
+```
+
+This is a hardcoded path rather than an `.env`-driven variable, because
+this stack is deployed via Portainer's Git integration, which doesn't
+reliably pick up a `.env` file from the repo. If you need to change the
+location, edit that line directly.
+
+Because it's a plain host directory rather than a Docker-managed
+volume, you can:
+
+- Back it up directly: `tar -czf loxberry-backup.tar.gz /home/docker/loxberry-data`
+- Inspect or edit files from the host without `docker exec`
+- Recreate, rebuild, or `docker rm` the container entirely without
+  losing anything — only deleting this folder yourself removes the data
+
+Note that the **container's own filesystem** (the systemd, Apache,
+Samba, vsftpd, ... packages installed by `install_trixie_v4.sh`) is
+*not* covered by this bind mount — that lives in the container layer
+itself. See "Surviving redeploys" below for how that gap is handled.
 
 ## Requirements
 
@@ -111,25 +141,61 @@ cp .env.example .env
 ## Build and start
 
 ```bash
-cp .env.example .env      # first time only, then edit as needed
+cp .env.example .env      # first time only, for the port settings - edit as needed
+mkdir -p /home/docker/loxberry-data
 docker compose build
 docker compose up -d
 ```
 
+Creating the folder yourself first avoids Docker auto-creating it as
+`root:root`; the container runs privileged, so this is rarely an issue
+in practice, but it's a cheap step to skip a class of permission
+problems entirely.
+
 ## Install LoxBerry
 
-The installer must run **after** systemd is already active, so it can't
-be part of `docker build` (there's no real PID 1 systemd to talk to
-during a build):
+On first boot, `loxberry-autoinstall.service` runs the installer for
+you automatically (see "Surviving redeploys" above) — no manual step
+needed. Follow progress with:
+
+```bash
+docker logs -f loxberry
+```
+
+Expect roughly 10-15 minutes, the same as on a real DietPi device.
+Afterwards, the web interface is reachable at
+`http://localhost:<LOXBERRY_HTTP_PORT>/` (8880 by default).
+
+If you ever need to trigger the installer manually (e.g. while
+debugging), the same script it calls can still be run directly — it
+must run **after** systemd is already active, so it can't be part of
+`docker build`:
 
 ```bash
 docker exec -it loxberry /root/install_trixie_v4.sh
 ```
 
-This downloads and installs the latest LoxBerry 4 release exactly like it
-would on a real DietPi device. Expect roughly the same 10-15 minutes as
-on a Raspberry Pi. Afterwards, the web interface is reachable at
-`http://localhost:<LOXBERRY_HTTP_PORT>/` (8880 by default).
+## Known gotcha: Portainer "pull access denied" on redeploy
+
+Portainer runs `docker compose pull` before redeploying a stack. Since
+this service only ever exists as a locally built image
+(`loxberry-experimental:4.0` isn't a real registry image),  that pull
+fails with something like:
+
+```
+pull access denied for loxberry-experimental, repository does not
+exist or may require 'docker login': denied: requested access to the
+resource is denied
+```
+
+`docker-compose.yml` already sets `pull_policy: build` to tell Compose
+to always build this service locally instead of pulling it. This needs
+Compose Spec support for `pull_policy` (Docker Compose v2.22+ / a
+reasonably recent Portainer). If your Portainer's bundled Compose is
+older and rejects the `pull_policy` key entirely (an error like
+`Additional property pull_policy is not allowed`), remove the `image:`
+line instead - Compose then falls back to auto-naming the built image
+and skips pulling it by design.
 
 ## Known gotcha: services stuck "enabled" but "inactive (dead)"
 

@@ -2,6 +2,11 @@ services:
   loxberry:
     build: .
     image: loxberry-experimental:4.0
+    pull_policy: build       # never pull - "loxberry-experimental" isn't a
+                              # real registry image, it only exists locally
+                              # once built. Without this, `docker compose
+                              # pull` (which Portainer runs on redeploy)
+                              # fails with "pull access denied".
     container_name: loxberry
     hostname: loxberry
     privileged: true          # required because systemd runs as PID 1
