@@ -122,7 +122,7 @@ docker compose up -d
 docker exec -it loxberry /root/install_trixie_v4.sh
 ```
 
-# LoxBerry healthcheck.pl patch (Docker false positives)
+## LoxBerry healthcheck.pl patch (Docker false positives)
 
 Fixes two false positives in `/opt/loxberry/sbin/healthcheck.pl`:
 
@@ -138,26 +138,26 @@ Fixes two false positives in `/opt/loxberry/sbin/healthcheck.pl`:
 Verified with `perl -c` against the exact code you pasted from your
 container — syntax is valid, brace-balanced.
 
-## Apply it
+### Apply it
 
 ```bash
-# Copy the file out of the running container
+## Copy the file out of the running container
 docker cp loxberry:/opt/loxberry/sbin/healthcheck.pl ./healthcheck.pl
 
-# Run the patch (writes healthcheck.pl.bak automatically)
+## Run the patch (writes healthcheck.pl.bak automatically)
 python3 patch_healthcheck.py ./healthcheck.pl
 
-# Copy the patched file back in
+## Copy the patched file back in
 docker cp ./healthcheck.pl loxberry:/opt/loxberry/sbin/healthcheck.pl
 
-# Re-run the healthcheck to confirm
+## Re-run the healthcheck to confirm
 docker exec -it loxberry /opt/loxberry/sbin/healthcheck.pl
 ```
 
 No service restart needed — `healthcheck.pl` is invoked fresh each
 time (by cron / the web UI), it isn't a long-running daemon.
 
-## Adjusting the 5GB floor
+### Adjusting the 5GB floor
 
 Open `patch_healthcheck.py` and change `ABSOLUTE_MIN_KB` at the top
 before running it, e.g. for a 2GB floor:
