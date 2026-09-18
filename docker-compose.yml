@@ -3,6 +3,7 @@ services:
     build: .
     image: loxberry-experimental:4.0
     container_name: loxberry
+    hostname: loxberry
     privileged: true          # required because systemd runs as PID 1
     cgroup: host
     tmpfs:
