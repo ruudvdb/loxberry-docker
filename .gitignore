@@ -4,3 +4,6 @@
 # Docker / OS noise
 *.log
 .DS_Store
+
+# Local Claude Code settings
+.claude/
