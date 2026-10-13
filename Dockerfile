@@ -111,8 +111,16 @@ EOF
 RUN chmod +x /boot/dietpi/func/dietpi-set_software /boot/dietpi/func/dietpi-set_hardware
 
 # --- Bundle the official LoxBerry installer ----------------------------------
+# Pinned to a specific commit instead of "main": the installer always
+# installs the latest LoxBerry *release*, but "main" can already expect
+# files that only exist on LoxBerry's master branch. E.g. installer commit
+# 80a7810 (2026-10-04) symlinks system/systemd/shellinabox.service, which
+# release 4.0.0.15 doesn't ship - the installer then aborts halfway with
+# only the Apache default page left. Bump this together with a new
+# LoxBerry release.
+ARG LOXBERRY_INSTALLER_REF=bcedc64f796f4ea39e22d65dca225a850745d9de
 RUN curl -fsSL -o /root/install_trixie_v4.sh \
-    https://raw.githubusercontent.com/mschlenstedt/Loxberry_Installer/main/install_trixie_v4.sh \
+    https://raw.githubusercontent.com/mschlenstedt/Loxberry_Installer/${LOXBERRY_INSTALLER_REF}/install_trixie_v4.sh \
     && chmod +x /root/install_trixie_v4.sh
 
 # Auto-reinstall on boot: /opt/loxberry's DATA survives a container

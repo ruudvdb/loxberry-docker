@@ -16,17 +16,24 @@ MARKER="/opt/loxberry/config/system/do_lbupdate"
 INSTALLER="/root/install_trixie_v4.sh"
 HEALTHCHECK_FILE="/opt/loxberry/sbin/healthcheck.pl"
 HEALTHCHECK_PATCHER="/usr/local/bin/patch_healthcheck.py"
+# Written only after the installer exits successfully. Lives in the
+# container's own writable layer (NOT in /opt/loxberry), so it disappears
+# together with the system packages on a container recreate. Checking
+# for apache2 alone isn't enough: an installer that aborts halfway has
+# already apt-installed apache2, and the next boot would then wrongly
+# skip the install and leave only the Apache default page.
+DONE_FLAG="/var/lib/loxberry-docker/install-complete"
 
 is_installed() {
-    dpkg-query -W -f='${Status}' apache2 2>/dev/null | grep -q "^install ok installed"
+    [ -e "$DONE_FLAG" ]
 }
 
 rc=0
 
 if is_installed; then
-    echo ">>> LoxBerry system packages are present, nothing to install."
+    echo ">>> LoxBerry install already completed in this container, nothing to install."
 else
-    echo ">>> LoxBerry system packages are missing (fresh container, redeploy, or rebuild)."
+    echo ">>> No completed LoxBerry install in this container (fresh container, redeploy, rebuild, or a previous failed attempt)."
 
     if [ -e "$MARKER" ]; then
         echo ">>> Found a leftover install marker from a previous container's data volume."
@@ -38,6 +45,12 @@ else
     "$INSTALLER"
     rc=$?
     echo ">>> Installer finished (exit code $rc)."
+    if [ "$rc" -eq 0 ]; then
+        mkdir -p "$(dirname "$DONE_FLAG")"
+        touch "$DONE_FLAG"
+    else
+        echo ">>> Installer FAILED - it will be retried on the next container start."
+    fi
 fi
 
 # Always (re)apply the Docker-specific healthcheck.pl fixes: after a
