@@ -3,18 +3,25 @@
 # The bind-mounted /opt/loxberry survives container recreation, but the
 # apt-installed system packages (apache2, samba, mosquitto, vsftpd, ...)
 # live in the container's own writable layer and do NOT survive a
-# "pull and redeploy" in Portainer, or any other container recreate.
+# redeploy (Komodo/Portainer rebuild) or any other container recreate.
 #
 # This script detects that mismatch and re-runs the installer
 # automatically, instead of requiring a manual `docker exec`. It then
 # always (re)applies the healthcheck.pl Docker fixes - see
 # patch_healthcheck.py - so that never needs a manual step either.
+#
+# IMPORTANT: the installer starts with `rm -rf /opt/loxberry`, i.e. it
+# wipes all LoxBerry settings (Miniserver, web login, plugins, ...).
+# So before re-running it on an existing install, this script takes a
+# full tar backup of /opt/loxberry into $BACKUP_DIR (a separate host bind
+# mount), and restores the user data from it once the installer is done.
 
 set -uo pipefail
 
-MARKER="/opt/loxberry/config/system/do_lbupdate"
+LBHOME="/opt/loxberry"
+MARKER="$LBHOME/config/system/do_lbupdate"
 INSTALLER="/root/install_trixie_v4.sh"
-HEALTHCHECK_FILE="/opt/loxberry/sbin/healthcheck.pl"
+HEALTHCHECK_FILE="$LBHOME/sbin/healthcheck.pl"
 HEALTHCHECK_PATCHER="/usr/local/bin/patch_healthcheck.py"
 # Written only after the installer exits successfully. Lives in the
 # container's own writable layer (NOT in /opt/loxberry), so it disappears
@@ -24,16 +31,111 @@ HEALTHCHECK_PATCHER="/usr/local/bin/patch_healthcheck.py"
 # skip the install and leave only the Apache default page.
 DONE_FLAG="/var/lib/loxberry-docker/install-complete"
 
+# Host bind mount (see docker-compose.yml) - must NOT be inside $LBHOME.
+BACKUP_DIR="/var/backups/loxberry"
+# Name of the backup still waiting to be restored. Survives a failed
+# installer run, so a retry restores the original backup instead of
+# backing up (and later restoring) the half-wiped tree.
+PENDING_RESTORE="$BACKUP_DIR/pending-restore"
+# Password hash of the 'loxberry' Linux user (SSH/console). /etc/shadow
+# lives in the container layer, so it's saved here on every boot and
+# put back after a reinstall (which resets it to 'loxberry').
+SHADOW_SAVE="$BACKUP_DIR/loxberry-user.shadow"
+KEEP_BACKUPS=10
+
+# User data restored after a reinstall: all of config/ and data/ (system
+# settings incl. Miniserver and web login, plugin settings, plugin
+# database), plus every directory LoxBerry installs plugin files into.
+# Copied OVER the fresh install, so the new LoxBerry code stays.
+RESTORE_PATHS=(
+    config
+    data
+    bin/plugins
+    log/plugins
+    templates/plugins
+    webfrontend/html/plugins
+    webfrontend/htmlauth/plugins
+    system/daemons/plugins
+    system/cron
+)
+
 is_installed() {
     [ -e "$DONE_FLAG" ]
 }
 
+has_existing_install() {
+    [ -e "$LBHOME/config/system/general.json" ]
+}
+
+backup_lbhome() {
+    local file="$BACKUP_DIR/loxberry-$(date +%Y%m%d-%H%M%S).tgz"
+    echo ">>> Backing up $LBHOME to $file ..."
+    if ! tar -czf "$file.part" -C "$LBHOME" .; then
+        rm -f "$file.part"
+        return 1
+    fi
+    mv "$file.part" "$file" || return 1
+    basename "$file" > "$PENDING_RESTORE"
+    echo ">>> Backup done ($(du -h "$file" | cut -f1))."
+}
+
+restore_user_data() {
+    local file="$BACKUP_DIR/$(cat "$PENDING_RESTORE")"
+    local tmp
+    tmp=$(mktemp -d /var/tmp/loxberry-restore.XXXXXX) || return 1
+    echo ">>> Restoring settings and plugins from $file ..."
+    if ! tar -xzf "$file" -C "$tmp"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    local p
+    for p in "${RESTORE_PATHS[@]}"; do
+        if [ -d "$tmp/$p" ]; then
+            mkdir -p "$LBHOME/$p"
+            cp -a "$tmp/$p/." "$LBHOME/$p/" || { rm -rf "$tmp"; return 1; }
+            echo "    restored $p"
+        fi
+    done
+    rm -rf "$tmp"
+
+    if [ -s "$SHADOW_SAVE" ]; then
+        usermod -p "$(cat "$SHADOW_SAVE")" loxberry \
+            && echo "    restored password of Linux user 'loxberry'"
+    fi
+
+    # Regenerate the mosquitto config from the restored MQTT settings (the
+    # installer does the same), then restart what reads the restored files.
+    PERL5LIB="$LBHOME/libs/perllib" "$LBHOME/sbin/mqtt-handler.pl" action=updateconfig || true
+    systemctl try-restart apache2.service mosquitto.service cron.service || true
+    rm -f "$PENDING_RESTORE"
+    echo ">>> Restore done."
+}
+
+prune_backups() {
+    ls -1t "$BACKUP_DIR"/loxberry-*.tgz 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+}
+
 rc=0
+mkdir -p "$BACKUP_DIR"
 
 if is_installed; then
     echo ">>> LoxBerry install already completed in this container, nothing to install."
+    if getent shadow loxberry | cut -d: -f2 > "$SHADOW_SAVE.tmp"; then
+        chmod 600 "$SHADOW_SAVE.tmp" && mv "$SHADOW_SAVE.tmp" "$SHADOW_SAVE"
+    fi
 else
     echo ">>> No completed LoxBerry install in this container (fresh container, redeploy, rebuild, or a previous failed attempt)."
+
+    if [ -e "$PENDING_RESTORE" ]; then
+        echo ">>> A previous attempt left backup $(cat "$PENDING_RESTORE") to restore - not taking a new one."
+    elif has_existing_install; then
+        if ! backup_lbhome; then
+            echo ">>> BACKUP FAILED - NOT running the installer, it would wipe $LBHOME."
+            echo ">>> Fix the problem (e.g. disk space for $BACKUP_DIR) and restart the container."
+            exit 1
+        fi
+        prune_backups
+    fi
 
     if [ -e "$MARKER" ]; then
         echo ">>> Found a leftover install marker from a previous container's data volume."
@@ -46,8 +148,19 @@ else
     rc=$?
     echo ">>> Installer finished (exit code $rc)."
     if [ "$rc" -eq 0 ]; then
-        mkdir -p "$(dirname "$DONE_FLAG")"
-        touch "$DONE_FLAG"
+        if [ -e "$PENDING_RESTORE" ] && ! restore_user_data; then
+            echo ">>> RESTORE FAILED - your data is still in $BACKUP_DIR/$(cat "$PENDING_RESTORE")."
+            echo ">>> It will be retried on the next container start."
+            rc=1
+        else
+            mkdir -p "$(dirname "$DONE_FLAG")"
+            touch "$DONE_FLAG"
+            # LoxBerry's own boot services (createtmpfs, loxberry.service:
+            # plugin daemons, post-install update) only run at boot, and on
+            # real hardware the installer is followed by a reboot.
+            echo ">>> Install complete. Restart the container once (docker restart loxberry)"
+            echo ">>> so LoxBerry's own boot services and plugin daemons start."
+        fi
     else
         echo ">>> Installer FAILED - it will be retried on the next container start."
     fi

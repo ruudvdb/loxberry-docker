@@ -20,6 +20,9 @@ services:
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - /home/docker/loxberry-data:/opt/loxberry
+      # Automatic backups of /opt/loxberry, taken before every reinstall
+      # (the LoxBerry installer wipes /opt/loxberry). See README.md.
+      - /home/docker/loxberry-backup:/var/backups/loxberry
     ports:
       # "<host port>:<container port>" - only the left-hand number needs to
       # change if it clashes with something else you already run. Defaults

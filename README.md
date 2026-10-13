@@ -41,28 +41,56 @@ If this stack is deployed via Portainer (or any other setup that
 recreates the container from the image, e.g. after a git push), be
 aware of what does and doesn't survive:
 
-- **Survives**: everything under `/opt/loxberry` (config, plugins,
-  logs) - it's bind-mounted from a fixed host path (see "Where your
-  data lives" below).
+- **Kept on the host**: everything under `/opt/loxberry` (config,
+  plugins, logs) - it's bind-mounted from a fixed host path (see
+  "Where your data lives" below). But see the warning below: the
+  reinstall wipes it, and only the automatic backup/restore keeps your
+  settings.
 - **Does NOT survive**: the apt-installed system packages (`apache2`,
-  `samba`, `mosquitto`, `vsftpd`, ...). Those live in the container's
-  own writable layer, which is discarded whenever the container is
-  recreated.
+  `samba`, `mosquitto`, `vsftpd`, ...) and system accounts/passwords.
+  Those live in the container's own writable layer, which is discarded
+  whenever the container is recreated.
 
 To bridge that gap, this image bakes in `loxberry-autoinstall.service`
 — a systemd unit, enabled by default, that runs on every boot and:
 
-1. Checks whether the system packages are actually present.
-2. If not (fresh container, or a redeploy that recreated it), removes
-   the stale install marker in `/opt/loxberry` (which would otherwise
-   make the installer refuse to run) and re-runs
-   `install_trixie_v4.sh` automatically.
-3. If the packages are already there, does nothing and boots normally.
+1. Checks whether this container already completed an install (a flag
+   in the container layer, written only when the installer succeeds).
+2. If not (fresh container, redeploy, or a previous failed attempt):
+   - **backs up all of `/opt/loxberry`** to
+     `/home/docker/loxberry-backup/loxberry-<date>-<time>.tgz` (the
+     last 10 are kept). This matters: `install_trixie_v4.sh` starts
+     with `rm -rf /opt/loxberry`, wiping every LoxBerry setting. If
+     the backup fails, the installer is NOT run.
+   - removes the stale install marker in `/opt/loxberry` (which would
+     otherwise make the installer refuse to run) and re-runs
+     `install_trixie_v4.sh` automatically;
+   - restores your settings and plugins from that backup over the
+     fresh install: `config/` and `data/` (Miniserver, web login,
+     MQTT, plugin settings and plugin database) plus all plugin
+     directories (`bin/`, `log/`, `templates/`,
+     `webfrontend/html(auth)/`, `system/daemons/` `plugins`) and
+     `system/cron/`;
+   - puts back the password of the `loxberry` Linux user (saved on
+     every normal boot to the backup folder).
+3. If the install is already there, does nothing and boots normally.
 
-In practice this means: a "pull and redeploy" in Portainer is safe and
-won't lose your LoxBerry configuration, but it does trigger another
-10-15 minute reinstall of the system packages before the web
-interface is reachable again. Watch it happen with:
+After such a reinstall, restart the container once
+(`docker restart loxberry`): LoxBerry's own boot services and plugin
+daemons only start at boot.
+
+**Not restored**: apt packages that plugins installed themselves
+(reinstall those plugins if they misbehave), and the Samba password
+(set it again in the LoxBerry web UI).
+
+**To update LoxBerry itself, use the updater in the LoxBerry web UI**
+(System → Update). That runs inside the existing container and keeps
+everything. A redeploy that recreates the container is only needed
+when this repo's Dockerfile/compose file changes.
+
+In practice a redeploy (Komodo, Portainer, ...) triggers another 10-15
+minute reinstall before the web interface is reachable again.
+Watch it happen with:
 
 ```bash
 docker logs -f loxberry
@@ -101,8 +129,8 @@ volume, you can:
 
 - Back it up directly: `tar -czf loxberry-backup.tar.gz /home/docker/loxberry-data`
 - Inspect or edit files from the host without `docker exec`
-- Recreate, rebuild, or `docker rm` the container entirely without
-  losing anything — only deleting this folder yourself removes the data
+- Restore by hand from the automatic backups in
+  `/home/docker/loxberry-backup` (`tar -xzf <file> -C /home/docker/loxberry-data`)
 
 Note that the **container's own filesystem** (the systemd, Apache,
 Samba, vsftpd, ... packages installed by `install_trixie_v4.sh`) is
