@@ -155,11 +155,14 @@ else
         else
             mkdir -p "$(dirname "$DONE_FLAG")"
             touch "$DONE_FLAG"
-            # LoxBerry's own boot services (createtmpfs, loxberry.service:
-            # plugin daemons, post-install update) only run at boot, and on
-            # real hardware the installer is followed by a reboot.
-            echo ">>> Install complete. Restart the container once (docker restart loxberry)"
-            echo ">>> so LoxBerry's own boot services and plugin daemons start."
+            # loxberry.service (system daemons such as the MQTT Gateway,
+            # plugin daemons) is created by the installer, so it didn't
+            # exist yet when this boot started and never ran. On real
+            # hardware a reboot follows the install; start it here instead.
+            # --no-block: don't wait on another unit from inside a unit
+            # that is itself still part of the boot transaction.
+            echo ">>> Install complete. Starting LoxBerry boot services (loxberry.service)..."
+            systemctl --no-block start loxberry.service || true
         fi
     else
         echo ">>> Installer FAILED - it will be retried on the next container start."

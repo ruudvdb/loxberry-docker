@@ -75,9 +75,10 @@ To bridge that gap, this image bakes in `loxberry-autoinstall.service`
      every normal boot to the backup folder).
 3. If the install is already there, does nothing and boots normally.
 
-After such a reinstall, restart the container once
-(`docker restart loxberry`): LoxBerry's own boot services and plugin
-daemons only start at boot.
+After such a reinstall the script also starts `loxberry.service`
+(LoxBerry's boot services: MQTT Gateway, plugin daemons, ...). The
+installer only creates that unit, so it didn't exist yet when the
+container booted. No manual restart is needed.
 
 **Not restored**: apt packages that plugins installed themselves
 (reinstall those plugins if they misbehave), and the Samba password
