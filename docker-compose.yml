@@ -32,6 +32,9 @@ services:
       - "${LOXBERRY_SSH_PORT:-2222}:22"
       - "${LOXBERRY_FTP_PORT:-2121}:21"
       - "${LOXBERRY_MQTT_PORT:-18830}:1883"
+      # MQTT Gateway UDP input: the Miniserver sends "Virtual Output UDP"
+      # commands here, which LoxBerry relays to MQTT.
+      - "${LOXBERRY_MQTT_UDP_PORT:-11884}:11884/udp"
       # Samba (NetBIOS + SMB) is off by default: it needs several ports and
       # is rarely reachable meaningfully through remapped host ports anyway.
       # Uncomment if you actually want file sharing from outside the host:

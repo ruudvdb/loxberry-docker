@@ -147,7 +147,7 @@ RUN mkdir -p /etc/systemd/system/multi-user.target.wants \
 # Ports LoxBerry normally uses (web, ssh, ftp, samba, mqtt). These are the
 # CONTAINER-internal ports; how they're published to the host is entirely
 # controlled in docker-compose.yml / .env — see README.md.
-EXPOSE 80 443 22 21 137/udp 138/udp 139 445 1883
+EXPOSE 80 443 22 21 137/udp 138/udp 139 445 1883 11884/udp
 
 STOPSIGNAL SIGRTMIN+3
 

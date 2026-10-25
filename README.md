@@ -159,6 +159,7 @@ because it's what LoxBerry expects internally.
 | SSH                   | 22              | `LOXBERRY_SSH_PORT`         | 2222 |
 | FTP (vsftpd)          | 21              | `LOXBERRY_FTP_PORT`         | 2121 |
 | MQTT (Mosquitto)      | 1883            | `LOXBERRY_MQTT_PORT`        | 18830 |
+| MQTT Gateway UDP in   | 11884/udp       | `LOXBERRY_MQTT_UDP_PORT`    | 11884 |
 | Samba UDP (NetBIOS)   | 137, 138        | `LOXBERRY_SAMBA_UDP_137/138`| 1137, 1138 (disabled by default) |
 | Samba TCP (SMB)       | 139, 445        | `LOXBERRY_SAMBA_TCP_139/445`| 1139, 1445 (disabled by default) |
 
