@@ -42,6 +42,14 @@ PENDING_RESTORE="$BACKUP_DIR/pending-restore"
 # put back after a reinstall (which resets it to 'loxberry').
 SHADOW_SAVE="$BACKUP_DIR/loxberry-user.shadow"
 KEEP_BACKUPS=10
+# Exit code of the last run, for build-installed-image.sh, which waits
+# for it in the staging container.
+RESULT_FILE="/var/lib/loxberry-docker/autoinstall-result"
+# Set by build-installed-image.sh in the staging container's backup dir.
+# That container runs on a copy of the real config, so it must not reach
+# out to the Miniserver: no plugin daemons, no plugin cron jobs.
+STAGING=0
+[ -e "$BACKUP_DIR/staging" ] && STAGING=1
 
 # User data restored after a reinstall: all of config/ and data/ (system
 # settings incl. Miniserver and web login, plugin settings, plugin
@@ -125,7 +133,12 @@ restore_user_data() {
     # Regenerate the mosquitto config from the restored MQTT settings (the
     # installer does the same), then restart what reads the restored files.
     PERL5LIB="$LBHOME/libs/perllib" "$LBHOME/sbin/mqtt-handler.pl" action=updateconfig || true
-    systemctl try-restart apache2.service mosquitto.service cron.service || true
+    if [ "$STAGING" -eq 1 ]; then
+        systemctl try-restart apache2.service mosquitto.service || true
+        systemctl stop cron.service || true
+    else
+        systemctl try-restart apache2.service mosquitto.service cron.service || true
+    fi
     rm -f "$PENDING_RESTORE"
     RESTORED=1
     echo ">>> Restore done."
@@ -191,7 +204,14 @@ prune_backups() {
     ls -1t "$BACKUP_DIR"/loxberry-*.tgz 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
 }
 
+finish() {
+    mkdir -p "$(dirname "$RESULT_FILE")"
+    echo "$1" > "$RESULT_FILE"
+    exit "$1"
+}
+
 rc=0
+rm -f "$RESULT_FILE"
 mkdir -p "$BACKUP_DIR"
 
 if is_installed; then
@@ -208,7 +228,7 @@ else
         if ! backup_lbhome; then
             echo ">>> BACKUP FAILED - NOT running the installer, it would wipe $LBHOME."
             echo ">>> Fix the problem (e.g. disk space for $BACKUP_DIR) and restart the container."
-            exit 1
+            finish 1
         fi
         prune_backups
     fi
@@ -298,9 +318,11 @@ fi
 # install; start it here instead - last, so plugin daemons find their
 # packages back. --no-block: don't wait on another unit from inside a
 # unit that is itself still part of the boot transaction.
-if [ "$START_LOXBERRY" -eq 1 ]; then
+if [ "$START_LOXBERRY" -eq 1 ] && [ "$STAGING" -eq 1 ]; then
+    echo ">>> Staging container: not starting loxberry.service (no plugin daemons)."
+elif [ "$START_LOXBERRY" -eq 1 ]; then
     echo ">>> Starting LoxBerry boot services (loxberry.service)..."
     systemctl --no-block start loxberry.service || true
 fi
 
-exit "$rc"
+finish "$rc"
