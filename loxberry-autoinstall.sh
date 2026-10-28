@@ -3,7 +3,7 @@
 # The bind-mounted /opt/loxberry survives container recreation, but the
 # apt-installed system packages (apache2, samba, mosquitto, vsftpd, ...)
 # live in the container's own writable layer and do NOT survive a
-# redeploy (Komodo/Portainer rebuild) or any other container recreate.
+# redeploy or any other container recreate.
 #
 # This script detects that mismatch and re-runs the installer
 # automatically, instead of requiring a manual `docker exec`. It then

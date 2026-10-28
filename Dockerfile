@@ -128,8 +128,8 @@ RUN curl -fsSL -o /root/install_trixie_v4.sh \
 # system packages (apache2, samba, mosquitto, vsftpd, ...) live in the
 # container's own writable layer and do NOT. This unit detects that
 # mismatch at every boot and re-runs the installer automatically -
-# important for GitOps-style deploys (e.g. Portainer "pull and
-# redeploy") where the container gets recreated from the image.
+# needed whenever a container starts from the base image instead of
+# an installed one (see build-installed-image.sh).
 COPY loxberry-autoinstall.sh /usr/local/bin/loxberry-autoinstall.sh
 RUN chmod +x /usr/local/bin/loxberry-autoinstall.sh
 
