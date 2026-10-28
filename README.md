@@ -151,7 +151,9 @@ stays for `docker logs loxberry-staging` until the next deploy.
 
 - Pre Deploy: command `bash build-installed-image.sh`, path `.`
 - Run Build: off (the compose file has no `build:`)
-- Auto Pull: off (the image only exists locally)
+- Pre Pull Images (`auto_pull`, called Auto Pull in older versions):
+  off (the image only exists locally)
+- Poll for Updates and Auto Update: off (no registry to poll)
 - Environment: `LOXBERRY_HOST_IP=...` (see "Weather4Lox cloud
   emulator")
 
@@ -323,7 +325,7 @@ resource is denied
 ```
 
 `docker-compose.yml` sets `pull_policy: never`, so Compose never tries
-to pull it. In Komodo, also keep Auto Pull off.
+to pull it. In Komodo, also keep Pre Pull Images (Auto Pull) off.
 
 ## Known gotcha: install hangs forever on "watchdog.service"
 
