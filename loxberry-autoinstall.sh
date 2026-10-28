@@ -314,6 +314,18 @@ else
     rm -f "$HOST_IP_FILE"
 fi
 
+# The timezone chosen in the web UI is stored in general.json, but a new
+# container starts with the one baked into the image. loxberryinit.sh
+# should apply it at boot, but a broken test there (`[ ... && ... ]`)
+# skips that, so only the hourly cron job would fix it. Apply it here.
+# Set the files directly: timedatectl needs timedated over D-Bus.
+TIMEZONE=$(jq -r '.Timeserver.Timezone // empty' "$LBHOME/config/system/general.json" 2>/dev/null || true)
+if [ -n "$TIMEZONE" ] && [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
+    echo ">>> Setting timezone to $TIMEZONE."
+    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+    echo "$TIMEZONE" > /etc/timezone
+fi
+
 # dnsmasq (installed by e.g. the Weather4Lox cloud emulator) is started by
 # Debian with --local-service: it only answers clients in its own subnet,
 # which inside Docker is just the bridge network - so queries from the
