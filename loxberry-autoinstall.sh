@@ -181,4 +181,41 @@ else
     echo ">>> Skipping healthcheck.pl patch: file not present yet."
 fi
 
+# LoxBerry's get_localip() returns the container's Docker-internal IP
+# (e.g. 172.x), which the Miniserver can't reach. Plugins use it for URLs
+# and DNS records they hand out - e.g. the Weather4Lox cloud emulator
+# points weather.loxone.com at it. If LOXBERRY_HOST_IP is set (see
+# docker-compose.yml), make get_localip() return that instead. Re-applied
+# on every boot because a LoxBerry core update overwrites these libraries.
+HOST_IP=$(tr '\0' '\n' < /proc/1/environ | sed -n 's/^LOXBERRY_HOST_IP=//p')
+HOST_IP_FILE="/etc/loxberry-docker/host-ip"
+PERL_SYSTEM="$LBHOME/libs/perllib/LoxBerry/System.pm"
+PHP_SYSTEM="$LBHOME/libs/phplib/loxberry_system.php"
+if [ -n "$HOST_IP" ]; then
+    echo ">>> Reporting Docker host IP $HOST_IP as LoxBerry's local IP."
+    mkdir -p "$(dirname "$HOST_IP_FILE")"
+    echo "$HOST_IP" > "$HOST_IP_FILE"
+    if [ -f "$PERL_SYSTEM" ] && ! grep -q "$HOST_IP_FILE" "$PERL_SYSTEM"; then
+        perl -0pi -e 's|(sub get_localip\n\{\n)|$1\tif (open(my \$fh, "<", "'"$HOST_IP_FILE"'")) { my \$ip = <\$fh>; chomp \$ip; return \$ip if \$ip; } # loxberry-docker\n|' "$PERL_SYSTEM"
+    fi
+    if [ -f "$PHP_SYSTEM" ] && ! grep -q "$HOST_IP_FILE" "$PHP_SYSTEM"; then
+        perl -0pi -e 's|(public static function get_localip\(\)\n\t\{\n)|$1\t\t\$ip = trim(\@file_get_contents("'"$HOST_IP_FILE"'")); if (\$ip) return \$ip; // loxberry-docker\n|' "$PHP_SYSTEM"
+    fi
+    # Weather4Lox cloud emulator: fix a DNS record still pointing at the
+    # container IP from before LOXBERRY_HOST_IP was set.
+    if [ -f /etc/dnsmasq.d/weather4lox.conf ]; then
+        sed -i -E "s|^(address=/[^/]+/).*|\1$HOST_IP|" /etc/dnsmasq.d/weather4lox.conf
+    fi
+else
+    rm -f "$HOST_IP_FILE"
+fi
+
+# dnsmasq (installed by e.g. the Weather4Lox cloud emulator) is started by
+# Debian with --local-service: it only answers clients in its own subnet,
+# which inside Docker is just the bridge network - so queries from the
+# Miniserver are silently dropped. Naming an interface turns that off.
+mkdir -p /etc/dnsmasq.d
+echo "interface=eth0" > /etc/dnsmasq.d/00-loxberry-docker.conf
+systemctl try-restart dnsmasq.service || true
+
 exit "$rc"

@@ -35,6 +35,13 @@ services:
       # MQTT Gateway UDP input: the Miniserver sends "Virtual Output UDP"
       # commands here, which LoxBerry relays to MQTT.
       - "${LOXBERRY_MQTT_UDP_PORT:-11884}:11884/udp"
+      # Weather4Lox cloud emulator: DNS (dnsmasq redirects
+      # weather.loxone.com to LoxBerry) and the emulated weather server.
+      # The Miniserver only ever uses ports 53 and 6066, so the host side
+      # must stay 53/6066 too.
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "6066:6066"
       # Samba (NetBIOS + SMB) is off by default: it needs several ports and
       # is rarely reachable meaningfully through remapped host ports anyway.
       # Uncomment if you actually want file sharing from outside the host:
@@ -42,4 +49,8 @@ services:
       # - "${LOXBERRY_SAMBA_UDP_138:-1138}:138/udp"
       # - "${LOXBERRY_SAMBA_TCP_139:-1139}:139"
       # - "${LOXBERRY_SAMBA_TCP_445:-1445}:445"
+    environment:
+      # LAN IP of the Docker host. LoxBerry otherwise reports its
+      # unreachable container IP (172.x) to plugins - see README.md.
+      - LOXBERRY_HOST_IP=${LOXBERRY_HOST_IP:-}
     restart: unless-stopped

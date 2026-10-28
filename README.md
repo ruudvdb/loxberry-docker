@@ -161,6 +161,8 @@ because it's what LoxBerry expects internally.
 | FTP (vsftpd)          | 21              | `LOXBERRY_FTP_PORT`         | 2121 |
 | MQTT (Mosquitto)      | 1883            | `LOXBERRY_MQTT_PORT`        | 18830 |
 | MQTT Gateway UDP in   | 11884/udp       | `LOXBERRY_MQTT_UDP_PORT`    | 11884 |
+| DNS (Weather4Lox emulator) | 53/udp, 53/tcp | — (fixed)            | 53 |
+| Weather4Lox emulator  | 6066            | — (fixed)                   | 6066 |
 | Samba UDP (NetBIOS)   | 137, 138        | `LOXBERRY_SAMBA_UDP_137/138`| 1137, 1138 (disabled by default) |
 | Samba TCP (SMB)       | 139, 445        | `LOXBERRY_SAMBA_TCP_139/445`| 1139, 1445 (disabled by default) |
 
@@ -173,6 +175,39 @@ cp .env.example .env
 # edit .env, e.g. if 8880 is already taken:
 #   LOXBERRY_HTTP_PORT=9080
 ```
+
+## Weather4Lox cloud emulator
+
+The Weather4Lox plugin can stand in for Loxone's weather service: it
+runs dnsmasq to point `weather.loxone.com` at LoxBerry, and serves the
+weather data itself on port 6066. In Docker that needs:
+
+1. **Ports 53 and 6066 on the host**, published in `docker-compose.yml`.
+   They can't be remapped: the Miniserver always asks DNS on 53 and
+   the weather server on 6066. Nothing else on the host may use them.
+2. **`LOXBERRY_HOST_IP`** set to the Docker host's LAN IP (in `.env` or
+   your Komodo/Portainer stack environment). Otherwise LoxBerry only
+   knows its container IP (172.x): dnsmasq would hand that to the
+   Miniserver, and the plugin's admin page would link to it. On every
+   boot, `loxberry-autoinstall.sh` makes LoxBerry's `get_localip()`
+   (Perl and PHP) return this IP and fixes the existing Weather4Lox DNS
+   record.
+3. **The Miniserver's DNS server** set to the Docker host's IP (Loxone
+   Config → Miniserver → network settings). If LoxBerry is down,
+   e.g. during a 10-15 minute reinstall, the Miniserver has no DNS. To
+   avoid that, add a DNS override `weather.loxone.com` → host IP in your
+   router or Pi-hole/AdGuard instead, and leave the Miniserver's DNS
+   alone. Port 6066 is still needed then.
+
+The boot script also adds `interface=eth0` to dnsmasq's config. Without
+it, Debian's `--local-service` default makes dnsmasq ignore every query
+from outside the Docker network, so the Miniserver would get no answer.
+
+After a redeploy (container recreate + reinstall), dnsmasq, the Apache
+site on port 6066 and the plugin's sudoers rules are gone: they live in
+the container layer, not in `/opt/loxberry`. Reinstall Weather4Lox from
+the plugin manager (your settings are kept), then save the cloud
+emulator setting again.
 
 ## Build and start
 
