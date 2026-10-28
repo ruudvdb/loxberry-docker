@@ -194,7 +194,12 @@ reinstall_plugins() {
     local w4l_emu="$LBHOME/bin/plugins/weather4lox/cloudemu.sh"
     if [ -x "$w4l_emu" ] && grep -qx 'EMU=1' "$w4l_cfg" 2>/dev/null; then
         echo ">>> Re-enabling the Weather4Lox cloud emulator ..."
-        "$w4l_emu" enable || echo ">>> Enabling the Weather4Lox cloud emulator FAILED"
+        # Not reported as FAILED: cloudemu.sh 4.20.1 also exits non-zero
+        # when only its own log bookkeeping fails ("Invalid emulator log
+        # status" on the first emulator log of a day). Whether the
+        # emulator really runs is checked by build-installed-image.sh
+        # (dnsmasq active, port 6066 answers).
+        "$w4l_emu" enable || echo ">>> Weather4Lox cloud emulator script returned an error - check that dnsmasq runs and port 6066 answers"
     fi
 
     systemctl try-reload-or-restart apache2.service || true
