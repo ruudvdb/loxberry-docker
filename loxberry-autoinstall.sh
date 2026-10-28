@@ -58,6 +58,18 @@ RESTORE_PATHS=(
     system/daemons/plugins
     system/cron
 )
+# System config that plugins add to (sudoers rules, Apache sites and
+# modules - /etc/sudoers.d and /etc/apache2 are symlinks into here).
+# Only files missing from the fresh install are copied back, so the new
+# LoxBerry defaults stay.
+RESTORE_MISSING_PATHS=(
+    system/sudoers
+    system/apache2
+)
+# Set once a reinstall restored the user data: plugins then still need
+# their system packages and root setup redone, see reinstall_plugins.
+RESTORED=0
+START_LOXBERRY=0
 
 is_installed() {
     [ -e "$DONE_FLAG" ]
@@ -96,6 +108,13 @@ restore_user_data() {
             echo "    restored $p"
         fi
     done
+    for p in "${RESTORE_MISSING_PATHS[@]}"; do
+        if [ -d "$tmp/$p" ]; then
+            mkdir -p "$LBHOME/$p"
+            cp -an "$tmp/$p/." "$LBHOME/$p/" || { rm -rf "$tmp"; return 1; }
+            echo "    restored missing files in $p"
+        fi
+    done
     rm -rf "$tmp"
 
     if [ -s "$SHADOW_SAVE" ]; then
@@ -108,7 +127,64 @@ restore_user_data() {
     PERL5LIB="$LBHOME/libs/perllib" "$LBHOME/sbin/mqtt-handler.pl" action=updateconfig || true
     systemctl try-restart apache2.service mosquitto.service cron.service || true
     rm -f "$PENDING_RESTORE"
+    RESTORED=1
     echo ">>> Restore done."
+}
+
+# Redo what each plugin installed outside /opt/loxberry, which the
+# reinstall threw away: its apt packages and its postroot script (Perl
+# modules, Apache modules, ...). Both are read from the copies LoxBerry's
+# plugin installer keeps of the currently installed plugin version in
+# data/system/install/<folder>/, so this follows plugin updates.
+reinstall_plugins() {
+    local db="$LBHOME/data/system/plugindatabase.json"
+    [ -f "$db" ] || return 0
+    local debian_major
+    debian_major=$(cut -d. -f1 /etc/debian_version)
+    local apt_updated=0
+
+    local folder name version
+    while IFS=$'\t' read -r folder name version; do
+        local dir="$LBHOME/data/system/install/$folder"
+        [ -d "$dir" ] || continue
+        echo ">>> Restoring system setup of plugin $name $version ..."
+
+        # Same apt file selection as LoxBerry's plugininstall.pl.
+        local aptfile="$dir/dpkg/apt"
+        [ -f "$dir/dpkg/apt$debian_major" ] && aptfile="$dir/dpkg/apt$debian_major"
+        if [ -f "$aptfile" ]; then
+            local packages
+            packages=$(grep -v '^\s*#' "$aptfile" | xargs)
+            if [ -n "$packages" ]; then
+                [ "$apt_updated" -eq 1 ] || { apt-get update; apt_updated=1; }
+                apt-get install -y --no-install-recommends $packages \
+                    || echo ">>> Installing apt packages of $name FAILED: $packages"
+            fi
+        fi
+
+        # Called like plugininstall.pl does: <tempfile> <name> <folder>
+        # <version> <lbhomedir> <tempfolder>, with /etc/environment loaded.
+        local script
+        for script in "$dir"/postroot*; do
+            [ -f "$script" ] || continue
+            chmod a+x "$script"
+            ( set -a; . /etc/environment; set +a
+              cd "$dir" && "$script" "$dir" "$name" "$folder" "$version" "$LBHOME" "$dir" ) \
+                || echo ">>> $(basename "$script") of $name FAILED"
+        done
+    done < <(jq -r '.plugins[] | [.folder, .name, .version] | @tsv' "$db")
+
+    # Weather4Lox enables its cloud emulator (dnsmasq + Apache site) only
+    # when its setting is saved; redo that. Must run after the host IP
+    # setup below has patched get_localip().
+    local w4l_cfg="$LBHOME/config/plugins/weather4lox/weather4lox.cfg"
+    local w4l_emu="$LBHOME/bin/plugins/weather4lox/cloudemu.sh"
+    if [ -x "$w4l_emu" ] && grep -qx 'EMU=1' "$w4l_cfg" 2>/dev/null; then
+        echo ">>> Re-enabling the Weather4Lox cloud emulator ..."
+        "$w4l_emu" enable || echo ">>> Enabling the Weather4Lox cloud emulator FAILED"
+    fi
+
+    systemctl try-reload-or-restart apache2.service || true
 }
 
 prune_backups() {
@@ -155,14 +231,8 @@ else
         else
             mkdir -p "$(dirname "$DONE_FLAG")"
             touch "$DONE_FLAG"
-            # loxberry.service (system daemons such as the MQTT Gateway,
-            # plugin daemons) is created by the installer, so it didn't
-            # exist yet when this boot started and never ran. On real
-            # hardware a reboot follows the install; start it here instead.
-            # --no-block: don't wait on another unit from inside a unit
-            # that is itself still part of the boot transaction.
-            echo ">>> Install complete. Starting LoxBerry boot services (loxberry.service)..."
-            systemctl --no-block start loxberry.service || true
+            echo ">>> Install complete."
+            START_LOXBERRY=1
         fi
     else
         echo ">>> Installer FAILED - it will be retried on the next container start."
@@ -217,5 +287,20 @@ fi
 mkdir -p /etc/dnsmasq.d
 echo "interface=eth0" > /etc/dnsmasq.d/00-loxberry-docker.conf
 systemctl try-restart dnsmasq.service || true
+
+if [ "$RESTORED" -eq 1 ]; then
+    reinstall_plugins
+fi
+
+# loxberry.service (system daemons such as the MQTT Gateway, plugin
+# daemons) is created by the installer, so it didn't exist yet when this
+# boot started and never ran. On real hardware a reboot follows the
+# install; start it here instead - last, so plugin daemons find their
+# packages back. --no-block: don't wait on another unit from inside a
+# unit that is itself still part of the boot transaction.
+if [ "$START_LOXBERRY" -eq 1 ]; then
+    echo ">>> Starting LoxBerry boot services (loxberry.service)..."
+    systemctl --no-block start loxberry.service || true
+fi
 
 exit "$rc"

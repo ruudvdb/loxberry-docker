@@ -71,18 +71,28 @@ To bridge that gap, this image bakes in `loxberry-autoinstall.service`
      directories (`bin/`, `log/`, `templates/`,
      `webfrontend/html(auth)/`, `system/daemons/` `plugins`) and
      `system/cron/`;
+   - puts back plugin sudoers rules and Apache sites/modules
+     (`system/sudoers/`, `system/apache2/`), only the files the fresh
+     install doesn't have, so LoxBerry's new defaults stay;
+   - per plugin, reinstalls its apt packages (`dpkg/apt`) and re-runs
+     its `postroot` script. LoxBerry's plugin installer keeps both for
+     the installed plugin version in `data/system/install/<plugin>/`,
+     so this follows plugin updates. The Weather4Lox cloud emulator is
+     switched back on if it was enabled;
    - puts back the password of the `loxberry` Linux user (saved on
      every normal boot to the backup folder).
 3. If the install is already there, does nothing and boots normally.
 
-After such a reinstall the script also starts `loxberry.service`
+After such a reinstall the script finally starts `loxberry.service`
 (LoxBerry's boot services: MQTT Gateway, plugin daemons, ...). The
 installer only creates that unit, so it didn't exist yet when the
 container booted. No manual restart is needed.
 
-**Not restored**: apt packages that plugins installed themselves
-(reinstall those plugins if they misbehave), and the Samba password
-(set it again in the LoxBerry web UI).
+**Not restored**: anything a plugin sets up outside its apt list and
+`postroot` script, e.g. `.deb` files it ships or system changes it only
+makes when you save a setting (reinstall such a plugin if it
+misbehaves), and the Samba password (set it again in the LoxBerry web
+UI).
 
 **To update LoxBerry itself, use the updater in the LoxBerry web UI**
 (System → Update). That runs inside the existing container and keeps
@@ -203,11 +213,10 @@ The boot script also adds `interface=eth0` to dnsmasq's config. Without
 it, Debian's `--local-service` default makes dnsmasq ignore every query
 from outside the Docker network, so the Miniserver would get no answer.
 
-After a redeploy (container recreate + reinstall), dnsmasq, the Apache
-site on port 6066 and the plugin's sudoers rules are gone: they live in
-the container layer, not in `/opt/loxberry`. Reinstall Weather4Lox from
-the plugin manager (your settings are kept), then save the cloud
-emulator setting again.
+After a redeploy, the reinstall restores the emulator by itself:
+it puts back the plugin's packages, sudoers rules and Apache site, and
+runs `cloudemu.sh enable` again if the emulator was on (`EMU=1`), which
+reinstalls dnsmasq.
 
 ## Build and start
 
