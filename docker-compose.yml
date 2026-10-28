@@ -1,12 +1,11 @@
 services:
   loxberry:
-    build: .
-    image: loxberry-experimental:4.0
-    pull_policy: build       # never pull - "loxberry-experimental" isn't a
-                              # real registry image, it only exists locally
-                              # once built. Without this, `docker compose
-                              # pull` (which Portainer runs on redeploy)
-                              # fails with "pull access denied".
+    # Built and installed by build-installed-image.sh (Komodo pre_deploy)
+    # before this file is deployed - see README.md. It only exists
+    # locally, so never pull it. Set LOXBERRY_IMAGE_TAG to an older date
+    # tag to roll back.
+    image: loxberry-docker:${LOXBERRY_IMAGE_TAG:-installed}
+    pull_policy: never
     container_name: loxberry
     hostname: loxberry
     privileged: true          # required because systemd runs as PID 1

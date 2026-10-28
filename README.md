@@ -99,8 +99,11 @@ UI).
 everything. A redeploy that recreates the container is only needed
 when this repo's Dockerfile/compose file changes.
 
-In practice a redeploy (Komodo, Portainer, ...) triggers another 10-15
-minute reinstall before the web interface is reachable again.
+A redeploy through Komodo does this reinstall in a temporary container
+first, so LoxBerry stays up meanwhile - see "Deploys without downtime"
+below. A container started from the base image (e.g. a manual
+`docker compose up` without an installed image) does the reinstall
+itself, 10-15 minutes before the web interface is reachable again.
 Watch it happen with:
 
 ```bash
@@ -113,11 +116,59 @@ only ever show the first couple of boot lines, and you'd need
 `docker exec -it loxberry journalctl -u loxberry-autoinstall.service -f`
 instead to see live progress.)
 
-If you want a redeploy to be instant instead, the real fix is baking
-the system packages into the image itself at build time rather than
-relying on `install_trixie_v4.sh` to apt-install them at runtime -
-that's a heavier change (effectively vendoring the installer's package
-list into the Dockerfile) and isn't done here yet.
+## Deploys without downtime
+
+`docker-compose.yml` runs `loxberry-docker:installed`, an image with
+LoxBerry already installed. `build-installed-image.sh` makes it, and
+Komodo runs that script before every deploy:
+
+1. It builds the base image (`loxberry-docker:base`) from the
+   Dockerfile.
+2. It starts a temporary container, `loxberry-staging`, from it: no
+   ports, on a copy of `/home/docker/loxberry-data`. There,
+   `loxberry-autoinstall.sh` installs LoxBerry and restores your
+   settings and plugins, as described above. It doesn't start plugin
+   daemons or cron jobs, so the copy doesn't talk to your Miniserver.
+3. It checks the result: install and restore succeeded, no plugin step
+   failed, Apache and Mosquitto run, the web UI answers, and, if the
+   Weather4Lox emulator is on, dnsmasq runs and port 6066 answers.
+4. It saves the container with `docker commit` as
+   `loxberry-docker:<date>-<time>` and tags it `installed`. The two
+   newest date tags are kept.
+
+Only then does Komodo run `docker compose up`, which replaces the
+running container in about a minute. The new container already has
+the install flag, so it boots straight onto your real data. Your
+running LoxBerry is not touched until then.
+
+A deploy still takes about 15 minutes, but without downtime. If the
+build or a check fails, the script exits with an error, Komodo stops
+the deploy, and the running container stays as it is. The deploy log
+shows the last lines of the temporary container; the stopped container
+stays for `docker logs loxberry-staging` until the next deploy.
+
+**Komodo settings** (Stack → Config):
+
+- Pre Deploy: command `bash build-installed-image.sh`, path `.`
+- Run Build: off (the compose file has no `build:`)
+- Auto Pull: off (the image only exists locally)
+- Environment: `LOXBERRY_HOST_IP=...` (see "Weather4Lox cloud
+  emulator")
+
+**Rolling back**: set `LOXBERRY_IMAGE_TAG=<date tag>` in the Stack
+environment (`docker images loxberry-docker` lists them) and redeploy.
+The script then skips the build, and the switch takes about a minute.
+Remove the variable to go back to `installed`.
+
+**Disk space**: each installed image is about 4.5 GB, and a build
+needs that much again temporarily. The script stops before building
+when Docker has less than 15 GB free.
+
+**Without Komodo**, run the same steps by hand:
+
+```bash
+bash build-installed-image.sh && docker compose up -d
+```
 
 ## Where your data lives
 
@@ -204,7 +255,7 @@ weather data itself on port 6066. In Docker that needs:
    record.
 3. **The Miniserver's DNS server** set to the Docker host's IP (Loxone
    Config → Miniserver → network settings). If LoxBerry is down,
-   e.g. during a 10-15 minute reinstall, the Miniserver has no DNS. To
+   even for the minute a deploy takes, the Miniserver has no DNS. To
    avoid that, add a DNS override `weather.loxone.com` → host IP in your
    router or Pi-hole/AdGuard instead, and leave the Miniserver's DNS
    alone. Port 6066 is still needed then.
@@ -213,7 +264,7 @@ The boot script also adds `interface=eth0` to dnsmasq's config. Without
 it, Debian's `--local-service` default makes dnsmasq ignore every query
 from outside the Docker network, so the Miniserver would get no answer.
 
-After a redeploy, the reinstall restores the emulator by itself:
+On a redeploy, the reinstall restores the emulator by itself:
 it puts back the plugin's packages, sudoers rules and Apache site, and
 runs `cloudemu.sh enable` again if the emulator was on (`EMU=1`), which
 reinstalls dnsmasq.
@@ -223,7 +274,7 @@ reinstalls dnsmasq.
 ```bash
 cp .env.example .env      # first time only, for the port settings - edit as needed
 mkdir -p /home/docker/loxberry-data
-docker compose build
+bash build-installed-image.sh
 docker compose up -d
 ```
 
@@ -234,12 +285,12 @@ problems entirely.
 
 ## Install LoxBerry
 
-On first boot, `loxberry-autoinstall.service` runs the installer for
-you automatically (see "Surviving redeploys" above) — no manual step
-needed. Follow progress with:
+`build-installed-image.sh` runs the installer for you, in its
+temporary container (see "Deploys without downtime" above) — no manual
+step needed. Follow progress with:
 
 ```bash
-docker logs -f loxberry
+docker logs -f loxberry-staging
 ```
 
 Expect roughly 10-15 minutes, the same as on a real DietPi device.
@@ -259,7 +310,7 @@ docker exec -it loxberry /root/install_trixie_v4.sh
 
 Portainer runs `docker compose pull` before redeploying a stack. Since
 this service only ever exists as a locally built image
-(`loxberry-experimental:4.0` isn't a real registry image),  that pull
+(`loxberry-docker:installed` isn't a real registry image), that pull
 fails with something like:
 
 ```
@@ -268,14 +319,8 @@ exist or may require 'docker login': denied: requested access to the
 resource is denied
 ```
 
-`docker-compose.yml` already sets `pull_policy: build` to tell Compose
-to always build this service locally instead of pulling it. This needs
-Compose Spec support for `pull_policy` (Docker Compose v2.22+ / a
-reasonably recent Portainer). If your Portainer's bundled Compose is
-older and rejects the `pull_policy` key entirely (an error like
-`Additional property pull_policy is not allowed`), remove the `image:`
-line instead - Compose then falls back to auto-naming the built image
-and skips pulling it by design.
+`docker-compose.yml` sets `pull_policy: never`, so Compose never tries
+to pull it. In Komodo, also keep Auto Pull off.
 
 ## Known gotcha: install hangs forever on "watchdog.service"
 
@@ -324,10 +369,9 @@ If several services are affected, it's usually faster to just rebuild
 clean:
 
 ```bash
-docker compose down -v
-docker compose build --no-cache
+docker build --no-cache -t loxberry-docker:base .
+bash build-installed-image.sh
 docker compose up -d
-docker exec -it loxberry /root/install_trixie_v4.sh
 ```
 
 ## LoxBerry healthcheck.pl patch (Docker false positives)
@@ -378,8 +422,8 @@ repo, e.g. for a 2GB floor:
 ABSOLUTE_MIN_KB = 2 * 1024 * 1024  # 2 GB
 ```
 
-Then rebuild the image (`docker compose build`) so the updated script
-gets baked in and used on the next install/boot.
+Then redeploy (or run `build-installed-image.sh`) so the updated
+script gets baked in and used on the next install/boot.
 
 ## Note
 
