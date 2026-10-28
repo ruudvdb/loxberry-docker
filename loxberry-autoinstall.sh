@@ -219,6 +219,15 @@ rc=0
 rm -f "$RESULT_FILE"
 mkdir -p "$BACKUP_DIR"
 
+# An image from build-installed-image.sh carries the install flag, but was
+# installed on a copy of the data. If the real data has no LoxBerry
+# install (fresh setup) or a failed reinstall left it half-restored, the
+# system files the flag vouches for don't match it: install after all.
+if is_installed && { ! has_existing_install || [ -e "$PENDING_RESTORE" ]; }; then
+    echo ">>> Install flag present, but $LBHOME has no complete LoxBerry install - installing anyway."
+    rm -f "$DONE_FLAG"
+fi
+
 if is_installed; then
     echo ">>> LoxBerry install already completed in this container, nothing to install."
     if getent shadow loxberry | cut -d: -f2 > "$SHADOW_SAVE.tmp"; then

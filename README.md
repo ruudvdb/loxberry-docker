@@ -158,7 +158,10 @@ stays for `docker logs loxberry-staging` until the next deploy.
 **Rolling back**: set `LOXBERRY_IMAGE_TAG=<date tag>` in the Stack
 environment (`docker images loxberry-docker` lists them) and redeploy.
 The script then skips the build, and the switch takes about a minute.
-Remove the variable to go back to `installed`.
+`installed` keeps pointing at the image you rolled back from: to
+return to it quickly, set its date tag instead. Removing the variable
+makes the next deploy build a new image again (15 minutes, no
+downtime).
 
 **Disk space**: each installed image is about 4.5 GB, and a build
 needs that much again temporarily. The script stops before building

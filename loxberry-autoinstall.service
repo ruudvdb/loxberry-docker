@@ -2,6 +2,10 @@
 Description=Re-run the LoxBerry installer if system packages are missing (e.g. after a redeploy)
 After=network-online.target
 Wants=network-online.target
+# Plugin daemons must see the host IP patch of get_localip(). Not cron:
+# the installer apt-installs it, and that blocking start would wait on
+# this unit forever.
+Before=loxberry.service
 
 [Service]
 Type=oneshot
