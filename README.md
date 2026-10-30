@@ -276,6 +276,16 @@ weather data itself on port 6066. In Docker that needs:
 The boot script also adds `interface=eth0` to dnsmasq's config. Without
 it, Debian's `--local-service` default makes dnsmasq ignore every query
 from outside the Docker network, so the Miniserver would get no answer.
+It also replaces the plugin's upstream servers (1.1.1.1/1.0.0.1) with
+Docker's DNS (127.0.0.11), so LAN names such as `optiplex.home` resolve
+again - for the Miniserver and for LoxBerry itself, whose
+`/etc/resolv.conf` points at this dnsmasq.
+
+With the DNS override in the router, nothing needs this dnsmasq. Set
+`LOXBERRY_DNSMASQ=off` in the Stack environment and the boot script
+stops and masks it, and points LoxBerry back at Docker's DNS. The
+Weather4Lox admin page may then report the emulator's DNS part as not
+running; the weather data on port 6066 is unaffected.
 
 A reinstall restores the emulator by itself: it puts back the plugin's
 packages, sudoers rules and Apache site, and runs `cloudemu.sh enable`

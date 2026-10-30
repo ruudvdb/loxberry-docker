@@ -52,4 +52,7 @@ services:
       # LAN IP of the Docker host. LoxBerry otherwise reports its
       # unreachable container IP (172.x) to plugins - see README.md.
       - LOXBERRY_HOST_IP=${LOXBERRY_HOST_IP:-}
+      # "off" stops LoxBerry's dnsmasq, for when weather.loxone.com is
+      # redirected in the router instead - see README.md.
+      - LOXBERRY_DNSMASQ=${LOXBERRY_DNSMASQ:-}
     restart: unless-stopped

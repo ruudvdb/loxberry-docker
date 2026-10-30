@@ -326,16 +326,39 @@ if [ -n "$TIMEZONE" ] && [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
     echo "$TIMEZONE" > /etc/timezone
 fi
 
+if [ "$RESTORED" -eq 1 ]; then
+    reinstall_plugins
+fi
+
 # dnsmasq (installed by e.g. the Weather4Lox cloud emulator) is started by
 # Debian with --local-service: it only answers clients in its own subnet,
 # which inside Docker is just the bridge network - so queries from the
 # Miniserver are silently dropped. Naming an interface turns that off.
+# Weather4Lox also forwards everything to 1.1.1.1/1.0.0.1, which can't
+# resolve LAN names (e.g. optiplex.home) - and since the container's own
+# resolv.conf points at this dnsmasq, neither can LoxBerry. Forward to
+# Docker's DNS instead, which uses the host's resolver. Its server=
+# lines are removed rather than outranked: dnsmasq would otherwise take
+# whichever upstream answers first, NXDOMAIN included.
+# After reinstall_plugins: cloudemu.sh enable rewrites weather4lox.conf.
 mkdir -p /etc/dnsmasq.d
-echo "interface=eth0" > /etc/dnsmasq.d/00-loxberry-docker.conf
-systemctl try-restart dnsmasq.service || true
-
-if [ "$RESTORED" -eq 1 ]; then
-    reinstall_plugins
+printf 'interface=eth0\nserver=127.0.0.11\n' > /etc/dnsmasq.d/00-loxberry-docker.conf
+if [ -f /etc/dnsmasq.d/weather4lox.conf ]; then
+    sed -i '/^server=/d' /etc/dnsmasq.d/weather4lox.conf
+fi
+# LOXBERRY_DNSMASQ=off: weather.loxone.com is redirected elsewhere (e.g.
+# in the router), so nothing needs this dnsmasq. Mask it, so neither the
+# image's enabled unit nor the plugin can start it, and point the
+# container back at Docker's DNS: stopping dnsmasq makes openresolv
+# rewrite resolv.conf without any nameserver.
+if [ "$(tr '\0' '\n' < /proc/1/environ | sed -n 's/^LOXBERRY_DNSMASQ=//p')" = "off" ]; then
+    echo ">>> LOXBERRY_DNSMASQ=off: stopping and masking dnsmasq."
+    systemctl disable --now dnsmasq.service 2>/dev/null || true
+    systemctl mask dnsmasq.service || true
+    printf 'nameserver 127.0.0.11\noptions ndots:0\n' > /etc/resolv.conf
+else
+    systemctl unmask dnsmasq.service 2>/dev/null || true
+    systemctl try-restart dnsmasq.service || true
 fi
 
 # loxberry.service (system daemons such as the MQTT Gateway, plugin
